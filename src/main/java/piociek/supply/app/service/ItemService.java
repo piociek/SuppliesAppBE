@@ -10,8 +10,10 @@ import piociek.supply.app.model.Item;
 import piociek.supply.app.model.LocationDetails;
 import piociek.supply.app.repository.SupplyAppMongoRepository;
 import piociek.supply.app.rest.Response;
+import piociek.supply.app.util.ItemHelper;
 
 import javax.websocket.server.PathParam;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Objects;
 import java.util.Optional;
@@ -19,8 +21,10 @@ import java.util.Optional;
 @Controller
 @RequiredArgsConstructor
 public class ItemService {
+
     private final static String ITEM_NOT_FOUND_MSG = "Item with id %s not found in the database";
 
+    private final ItemHelper itemHelper;
     private final SupplyAppMongoRepository supplyAppMongoRepository;
 
     @RequestMapping(value = "/getAllItems", method = RequestMethod.GET)
@@ -29,6 +33,15 @@ public class ItemService {
         return Response.builder()
                 .success(true)
                 .items(supplyAppMongoRepository.findAll())
+                .build();
+    }
+
+    @RequestMapping(value = "/syncFrom", method = RequestMethod.GET)
+    @ResponseBody
+    public Response syncFrom(@PathParam(value = "date") String date) {
+        return Response.builder()
+                .success(true)
+                .items(supplyAppMongoRepository.findAllByLastModifiedGreaterThan(date))
                 .build();
     }
 
@@ -51,17 +64,18 @@ public class ItemService {
 
     @RequestMapping(value = "/saveItem", method = RequestMethod.POST)
     @ResponseBody
-    public Response saveItem(@RequestBody Item item) {
+    public Response saveItem(@RequestBody Item item, @PathParam(value = "syncFrom") String syncFrom) {
+        item.setLastModified(itemHelper.getCurrentTimeStamp());
         supplyAppMongoRepository.save(item);
-        return Response.builder().success(true).build();
+        return Response.builder().success(true).items(getSyncFromCollectionOrDefault(syncFrom, Collections.singleton(item))).build();
     }
 
     @RequestMapping(value = "/deleteItem", method = RequestMethod.DELETE)
     @ResponseBody
-    public Response deleteItem(@PathParam(value = "itemId") String itemId) {
+    public Response deleteItem(@PathParam(value = "itemId") String itemId, @PathParam(value = "syncFrom") String syncFrom) {
         if (supplyAppMongoRepository.findById(itemId).isPresent()) {
             supplyAppMongoRepository.deleteById(itemId);
-            return Response.builder().success(true).build();
+            return Response.builder().success(true).items(getSyncFromCollectionOrDefault(syncFrom, Collections.emptyList())).build();
         }
         return Response.builder()
                 .success(false)
@@ -72,6 +86,7 @@ public class ItemService {
     @RequestMapping(value = "/saveLocationDetails", method = RequestMethod.POST)
     @ResponseBody
     public Response saveLocationDetails(@PathParam(value = "itemId") String itemId,
+                                        @PathParam(value = "syncFrom") String syncFrom,
                                         @RequestBody LocationDetails locationDetails) {
         Optional<Item> optionalItem = supplyAppMongoRepository.findById(itemId);
         if (optionalItem.isPresent()) {
@@ -96,8 +111,9 @@ public class ItemService {
                 }
                 item.getLocationDetails().add(locationDetails);
             }
+            item.setLastModified(itemHelper.getCurrentTimeStamp());
             supplyAppMongoRepository.save(item);
-            return Response.builder().success(true).items(Collections.singletonList(item)).build();
+            return Response.builder().success(true).items(getSyncFromCollectionOrDefault(syncFrom, Collections.singleton(item))).build();
         } else {
             return Response.builder()
                     .success(false)
@@ -109,6 +125,7 @@ public class ItemService {
     @RequestMapping(value = "/deleteLocationDetails", method = RequestMethod.DELETE)
     @ResponseBody
     public Response deleteLocationDetails(@PathParam(value = "itemId") String itemId,
+                                          @PathParam(value = "syncFrom") String syncFrom,
                                           @PathParam(value = "locationDetailsId") String locationDetailsId) {
         String responseMessage;
         Optional<Item> optionalItem = supplyAppMongoRepository.findById(itemId);
@@ -120,8 +137,9 @@ public class ItemService {
                             .findFirst();
             if (optionalLocationDetails.isPresent()) {
                 item.getLocationDetails().remove(optionalLocationDetails.get());
+                item.setLastModified(itemHelper.getCurrentTimeStamp());
                 supplyAppMongoRepository.save(item);
-                return Response.builder().success(true).items(Collections.singletonList(item)).build();
+                return Response.builder().success(true).items(getSyncFromCollectionOrDefault(syncFrom, Collections.singleton(item))).build();
             } else {
                 responseMessage =
                         String.format("Location details with id %s for Item with id %s not found in the database",
@@ -134,5 +152,9 @@ public class ItemService {
                 .success(false)
                 .message(responseMessage)
                 .build();
+    }
+
+    private Collection<Item> getSyncFromCollectionOrDefault(String syncFrom, Collection<Item> defaultCollection) {
+        return Objects.nonNull(syncFrom) ? supplyAppMongoRepository.findAllByLastModifiedGreaterThan(syncFrom) : defaultCollection;
     }
 }
