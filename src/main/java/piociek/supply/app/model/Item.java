@@ -13,8 +13,15 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Item {
+
+    public Item(String id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+
     @Id
     private String id;
+    private String lastModified;
     private String barCode;
     private String category;
     private String name;
